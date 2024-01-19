@@ -73,6 +73,8 @@ class Cloader:
         self.mapping = None
         self._available_boot_uri = ('radio://0/110/2M/E7E7E7E7E7', 'radio://0/0/2M/E7E7E7E7E7')
 
+        self.progress = {}
+
     def close(self):
         print("Cloader: close")
         """ Close the link """
@@ -174,7 +176,7 @@ class Cloader:
         print("Cloader: check_link_and_get_info:"+str(target_id))
         """Try to get a connection with the bootloader ...
            update_info has a timeout of 10 seconds """
-        if self._update_info_stm32(target_id):
+        if self._update_info_stm32_alt(target_id):
             if self._in_boot_cb:
                 self._in_boot_cb.call(True, self.targets[
                     target_id].protocol_version)
@@ -260,6 +262,85 @@ class Cloader:
         print("Cloader: _update_info false end") 
         return False
     
+    
+    def _update_info_stm32_alt(self, target_id):
+        print("Cloader: _update_info start:"+str(target_id))
+        """ Call the command getInfo and fill up the information received in
+        the fields of the object
+        """
+        CMD_GET_INFO = 0x10
+        CMD_GET_INFO_ACK = 0x20
+
+        # Call getInfo ...
+        pk = CRTPPacket()
+        pk.set_header(0xFF, 0xFF)   # 设置port和channel
+        pk.data = (target_id, CMD_GET_INFO)
+        self.link.send_packet(pk)
+
+        flag = False # 表示第几次接收到数据包
+        timeout_times = 0 # 超时次数
+        timeout_times_max = 3 # 超时次数最大值
+        each_wait_time = 2  # 每次等待时间
+        timeout = 10  # seconds
+        ts = time.time()
+        while time.time() - ts < timeout:
+            # Wait for the answer
+            answer = self.link.receive_packet(each_wait_time)
+            if answer is None:
+                timeout_times = timeout_times+1
+                if timeout_times < timeout_times_max:
+                    self.link.send_packet(pk)
+                else:
+                    if flag:
+                        return True
+                    else:
+                        return False
+            else:
+                if (answer.header == 0xFF and struct.unpack('<BB', answer.data[0:2]) ==
+                        (target_id, CMD_GET_INFO_ACK)):
+                    tab = struct.unpack('BBHHHH', answer.data[0:10])
+                    cpuid = struct.unpack('H', answer.data[10:12])
+                    self.progress[cpuid]=0
+
+                    if not flag:
+                        flag = True
+                        if target_id not in self.targets:
+                            self.targets[target_id] = Target(target_id)
+                        self.targets[target_id].addr = target_id
+                        if len(answer.data) > 12:
+                            self.targets[target_id].protocol_version = answer.datat[12]
+                            self.protocol_version = answer.datat[12]
+
+                        self.targets[target_id].page_size = tab[2]
+                        self.targets[target_id].buffer_pages = tab[3]
+                        self.targets[target_id].flash_pages = tab[4]
+                        self.targets[target_id].start_page = tab[5]
+                        self.targets[target_id].cpuid = '%02X' % cpuid[0]
+                    else:
+                        pass
+
+                    print("-- print cpu id start--")
+                    print('target id'+str(target_id))
+                    print(self.targets[target_id].cpuid)
+                    print("-- print cpu id end  --")
+                    if (self.protocol_version == 0x10 and
+                            target_id == TargetTypes.STM32):
+                        self._update_mapping(target_id)
+
+                    print("Cloader: _update_info true end")
+                    return True
+        print("Cloader: _update_info false end") 
+        return False
+    
+    def _set_start_sencond_stage(self,target_id):
+        CMD_START_SECOND_STAGE=0x31
+        pk = CRTPPacket()
+        pk.set_header(0xFF, 0xFF)   # 设置port和channel
+        pk.data = (target_id, CMD_START_SECOND_STAGE)
+        self.link.send_packet(pk)
+        pass
+    
+
     def _update_info_nrf(self, target_id=TargetTypes.NRF51):
         print("Cloader: _update_info_nrf start:"+str(target_id))
         """ Call the command getInfo and fill up the information received in

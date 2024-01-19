@@ -299,10 +299,10 @@ class Bootloader:
         print("Bootloader: _internal_flash")
         target_info = self._cload.targets[TargetTypes.from_string(artifact.target.target)]
 
-        image = artifact.content
-        t_data = target_info
+        image = artifact.content    # 其实就是要烧录的内容
+        t_data = target_info    # 要烧录的无人机的信息
 
-        start_page = target_info.start_page
+        start_page = target_info.start_page # 起始页
 
         # If used from a UI we need some extra things for reporting progress
         factor = (100.0 * t_data.page_size) / len(image)    # 从这里来看page_size是之前请求STM32数据然后得到的
@@ -414,6 +414,130 @@ class Bootloader:
                     print('\nError during flash operation (code %d). Maybe'
                           ' wrong radio link?' % self._cload.error_code)
                 raise Exception()
+
+    def _internal_flash_alt(self, artifact: FlashArtifact, current_file_number=1, total_files=1):
+
+        print("Bootloader: _internal_flash_alt")
+        target_info = self._cload.targets[TargetTypes.from_string(artifact.target.target)]
+
+        image = artifact.content    # 其实就是要烧录的内容
+        t_data = target_info    # 要烧录的无人机的信息
+
+        start_page = target_info.start_page # 起始页
+
+        # If used from a UI we need some extra things for reporting progress
+        factor = (100.0 * t_data.page_size) / len(image)    # 从这里来看page_size是之前请求STM32数据然后得到的
+        progress = 0
+
+        if self.progress_cb:
+            self.progress_cb(
+                'Firmware ({}/{}) Starting...'.format(current_file_number, total_files),
+                int(progress))
+        else:
+            sys.stdout.write(
+                'Flashing {} of {} to {} ({}): '.format(
+                    current_file_number, total_files,
+                    TargetTypes.to_string(t_data.id), artifact.target.type))
+            sys.stdout.flush()
+
+        if len(image) > ((t_data.flash_pages - start_page) *
+                         t_data.page_size):
+            if self.progress_cb:
+                self.progress_cb('Error: Not enough space to flash the image file.', int(progress))
+            else:
+                print('Error: Not enough space to flash the image file.')
+            raise Exception('Not enough space to flash the image file')
+
+        if not self.progress_cb:
+            logger.info(('%d bytes (%d pages) ' % (
+                (len(image) - 1), int(len(image) / t_data.page_size) + 1)))
+            sys.stdout.write(('%d bytes (%d pages) ' % (
+                (len(image) - 1), int(len(image) / t_data.page_size) + 1)))
+            sys.stdout.flush()
+
+        need_pages = int((len(image) - 1) / t_data.page_size) + 1 # 需要的页数
+        # For each page
+        ctr = 0  # Buffer counter
+        for i in range(0, need_pages):
+            if self.terminate_flashing_cb and self.terminate_flashing_cb():
+                raise Exception('Flashing terminated')
+
+            # Load the buffer
+            if ((i + 1) * t_data.page_size) > len(image):
+                self._cload.upload_buffer(
+                    t_data.addr, ctr, 0, image[i * t_data.page_size:])
+            else:
+                self._cload.upload_buffer(
+                    t_data.addr, ctr, 0,
+                    image[i * t_data.page_size: (i + 1) * t_data.page_size])
+
+            ctr += 1
+
+            if self.progress_cb:
+                progress += factor
+                self.progress_cb('Firmware ({}/{}) Uploading buffer to {}...'.format(
+                    current_file_number,
+                    total_files,
+                    TargetTypes.to_string(t_data.id)),
+
+                    int(progress))
+            else:
+                sys.stdout.write('.')
+                sys.stdout.flush()
+
+            # Flash when the complete buffers are full
+            if ctr >= t_data.buffer_pages:
+                if self.progress_cb:
+                    self.progress_cb('Firmware ({}/{}) Writing buffer to {}...'.format(
+                        current_file_number,
+                        total_files,
+                        TargetTypes.to_string(t_data.id)),
+
+                        int(progress))
+                else:
+                    sys.stdout.write('%d' % ctr)
+                    sys.stdout.flush()
+                if not self._cload.write_flash(t_data.addr, 0,
+                                               start_page + i - (ctr - 1),
+                                               ctr):
+                    if self.progress_cb:
+                        self.progress_cb(
+                            'Error during flash operation (code {})'.format(
+                                self._cload.error_code),
+                            int(progress))
+                    else:
+                        print('\nError during flash operation (code %d). '
+                              'Maybe wrong radio link?' %
+                              self._cload.error_code)
+                    raise Exception()
+
+                ctr = 0
+
+        if ctr > 0:
+            if self.progress_cb:
+                self.progress_cb('Firmware ({}/{}) Writing buffer to {}...'.format(
+                    current_file_number,
+                    total_files,
+                    TargetTypes.to_string(t_data.id)),
+                    int(progress))
+            else:
+                sys.stdout.write('%d' % ctr)
+                sys.stdout.flush()
+            if not self._cload.write_flash(
+                    t_data.addr, 0,
+                    (start_page + (int((len(image) - 1) / t_data.page_size)) -
+                     (ctr - 1)), ctr):
+                if self.progress_cb:
+                    self.progress_cb(
+                        'Error during flash operation (code {})'.format(
+                            self._cload.error_code),
+                        int(progress))
+                else:
+                    print('\nError during flash operation (code %d). Maybe'
+                          ' wrong radio link?' % self._cload.error_code)
+                raise Exception()
+
+        
 
     def _get_platform_id(self):
         print("Bootloader: _get_platform_id")
