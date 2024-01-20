@@ -477,7 +477,7 @@ class Cloader:
         self.link.send_packet(pk)
         
         # 如果有丢失的，则会接收到数据包
-        answer = self.link.receive_packet(1)
+        answer = self.link.receive_packet(0)
         while(answer): # answer不为空
             print("upload_buffer_query_loss 接收到数据包",end=",")
             if (answer.header == 0xFF and struct.unpack('<BB', answer.data[0:2]) ==

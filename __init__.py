@@ -335,22 +335,34 @@ class Bootloader:
             sys.stdout.flush()
 
         # For each page
-        ctr = 0  # Buffer counter
-        for i in range(0, int((len(image) - 1) / t_data.page_size) + 1):
-            
-            if self.terminate_flashing_cb and self.terminate_flashing_cb():
-                raise Exception('Flashing terminated')
+        need_pages = int((len(image) - 1) / t_data.page_size) + 1
+        
+        i = 0
+        ctr = 0 # 这一轮有多少页
+        while (i < need_pages) :
+            flag = True
+            relative_start_page = i # 暂存i的值，用于回滚
+            ctr = 0
+            while flag:
+                ctr = 0   # j用来记录每次将多少页放到buffer中
+                i = relative_start_page   
+                while ((ctr<t_data.buffer_pages) and i < need_pages):
+                    if self.terminate_flashing_cb and self.terminate_flashing_cb():
+                        raise Exception('Flashing terminated')
 
-            # Load the buffer
-            if ((i + 1) * t_data.page_size) > len(image):
-                self._cload.upload_buffer_alt(
-                    t_data.addr, ctr, 0, image[i * t_data.page_size:])
-            else:
-                self._cload.upload_buffer_alt(
-                    t_data.addr, ctr, 0,
-                    image[i * t_data.page_size: (i + 1) * t_data.page_size])
-
-            ctr += 1
+                    # Load the buffer
+                    if ((i + 1) * t_data.page_size) > len(image):
+                        self._cload.upload_buffer_alt(
+                            t_data.addr, ctr, 0, image[i * t_data.page_size:])
+                    else:
+                        self._cload.upload_buffer_alt(
+                            t_data.addr, ctr, 0,
+                            image[i * t_data.page_size: (i + 1) * t_data.page_size])
+                    i += 1
+                    ctr += 1
+                if(self._cload.upload_buffer_query_loss(t_data.addr)==False):
+                    print("没有丢失数据包: page"+str(i))
+                    flag = False                  
 
             if self.progress_cb:
                 progress += factor
@@ -364,52 +376,23 @@ class Bootloader:
                 sys.stdout.write('.')
                 sys.stdout.flush()
 
-            # Flash when the complete buffers are full
-            if ctr >= t_data.buffer_pages:
-                if self.progress_cb:
-                    self.progress_cb('Firmware ({}/{}) Writing buffer to {}...'.format(
-                        current_file_number,
-                        total_files,
-                        TargetTypes.to_string(t_data.id)),
-
-                        int(progress))
-                else:
-                    sys.stdout.write('%d' % ctr)
-                    sys.stdout.flush()
-                
-                # 这里已经完成了一页的写，我需要在这里检查
-                
-
-                if not self._cload.write_flash(t_data.addr, 0,
-                                               start_page + i - (ctr - 1),
-                                               ctr):
-                    if self.progress_cb:
-                        self.progress_cb(
-                            'Error during flash operation (code {})'.format(
-                                self._cload.error_code),
-                            int(progress))
-                    else:
-                        print('\nError during flash operation (code %d). '
-                              'Maybe wrong radio link?' %
-                              self._cload.error_code)
-                    raise Exception()
-
-                ctr = 0
-
-        if ctr > 0:
             if self.progress_cb:
                 self.progress_cb('Firmware ({}/{}) Writing buffer to {}...'.format(
-                    current_file_number,
-                    total_files,
-                    TargetTypes.to_string(t_data.id)),
-                    int(progress))
+                current_file_number,
+                total_files,
+                TargetTypes.to_string(t_data.id)),
+                int(progress))
             else:
-                sys.stdout.write('%d' % ctr)
+                sys.stdout.write('%d' % i)
                 sys.stdout.flush()
-            if not self._cload.write_flash(
-                    t_data.addr, 0,
-                    (start_page + (int((len(image) - 1) / t_data.page_size)) -
-                     (ctr - 1)), ctr):
+            print('ctr'+str(ctr))
+            print('start_page:'+str(start_page),end=',')
+            print('i:'+str(i),end=',')
+            print("start page:"+str(start_page + i - (ctr - 1)))
+            if not self._cload.write_flash(t_data.addr, 0,
+                                               start_page + (i-1) - (ctr - 1),
+                                               ctr):
+                
                 if self.progress_cb:
                     self.progress_cb(
                         'Error during flash operation (code {})'.format(
@@ -417,7 +400,7 @@ class Bootloader:
                         int(progress))
                 else:
                     print('\nError during flash operation (code %d). Maybe'
-                          ' wrong radio link?' % self._cload.error_code)
+                            ' wrong radio link?' % self._cload.error_code)
                 raise Exception()
 
     def _internal_flash_alt(self, artifact: FlashArtifact, current_file_number=1, total_files=1):
@@ -490,7 +473,7 @@ class Bootloader:
                 sys.stdout.write('.')
                 sys.stdout.flush()
 
-            self._cload.upload_buffer_process_loss(t_data.addr) # 这里来处理缺失的情况
+            # self._cload.upload_buffer_process_loss(t_data.addr) # 这里来处理缺失的情况
 
             # Flash when the complete buffers are full
             if ctr >= t_data.buffer_pages:
@@ -504,6 +487,10 @@ class Bootloader:
                 else:
                     sys.stdout.write('%d' % ctr)
                     sys.stdout.flush()
+                print('ctr'+str(ctr))
+                print('start_page:'+str(start_page),end=',')
+                print('i:'+str(i),end=',')
+                print("start page:"+str(start_page + i - (ctr - 1)))
                 if not self._cload.write_flash(t_data.addr, 0,
                                                start_page + i - (ctr - 1),
                                                ctr):
@@ -530,6 +517,11 @@ class Bootloader:
             else:
                 sys.stdout.write('%d' % ctr)
                 sys.stdout.flush()
+            print('ctr'+str(ctr))
+            print('start_page:'+str(start_page),end=',')
+            print('i:'+str(i),end=',')
+            print("start page:"+str((int((len(image) - 1) / t_data.page_size)) -
+                     (ctr - 1)))
             if not self._cload.write_flash(
                     t_data.addr, 0,
                     (start_page + (int((len(image) - 1) / t_data.page_size)) -
