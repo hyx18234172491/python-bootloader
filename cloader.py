@@ -242,6 +242,7 @@ class Cloader:
                 #     self.protocol_version = answer.datat[12]
 
                 self.targets[target_id].page_size = tab[2]
+                print("page size:"+str(tab[2]))
                 self.targets[target_id].buffer_pages = tab[3]
                 self.targets[target_id].flash_pages = tab[4]
                 self.targets[target_id].start_page = tab[5]
@@ -264,7 +265,7 @@ class Cloader:
     
     
     def _update_info_stm32_alt(self, target_id):
-        print("Cloader: _update_info start:"+str(target_id))
+        print("Cloader: _update_info alt start:"+str(target_id))
         """ Call the command getInfo and fill up the information received in
         the fields of the object
         """
@@ -312,6 +313,7 @@ class Cloader:
                             self.protocol_version = answer.datat[12]
 
                         self.targets[target_id].page_size = tab[2]
+                        print("page size:"+str(tab[2]))
                         self.targets[target_id].buffer_pages = tab[3]
                         self.targets[target_id].flash_pages = tab[4]
                         self.targets[target_id].start_page = tab[5]
@@ -426,6 +428,7 @@ class Cloader:
                     page += m[(2 * i) + 1]
 
     def upload_buffer(self, target_id, page, address, buff):
+        # address是对页中的内容进行编号
         print("Cloader: upload_buffer "+str(target_id))
         """Upload data into a buffer on the Crazyflie"""
         # print len(buff)
@@ -448,6 +451,70 @@ class Cloader:
                                       i + address + 1)
 
         self.link.send_packet(pk)
+    
+    def upload_buffer_alt(self, target_id, page, address, buff):
+        self.upload_buffer(target_id, page, address, buff)
+        # while(self.upload_buffer_query_loss(target_id)):    # 只要还有未接收到的则重新loaderbuffer
+        #     print("retry loader buffer page-"+str(page))
+        #     self.upload_buffer(target_id, page, address, buff)
+
+
+    def upload_buffer_query_loss(self,target_id):
+        '''
+        如果有丢失则返回true,没有丢失则返回false
+        '''
+        # 问一下谁有缺失
+        CMD_QUERY_IS_LOSS=0x31
+        CMD_QUERY_IS_LOSS_ACK=0x32
+        pk = CRTPPacket()
+        pk.set_header(0xFF, 0xFF)
+        pk.data = struct.pack('=BB', target_id,CMD_QUERY_IS_LOSS)
+        # 发送之前清空网络中遗留的数据包
+        pk_left = self.link.receive_packet(0)
+        while pk_left is not None:
+                    pk_left = self.link.receive_packet(0)
+        # 发送
+        self.link.send_packet(pk)
+        
+        # 如果有丢失的，则会接收到数据包
+        answer = self.link.receive_packet(1)
+        while(answer): # answer不为空
+            print("upload_buffer_query_loss 接收到数据包",end=",")
+            if (answer.header == 0xFF and struct.unpack('<BB', answer.data[0:2]) ==
+                        (target_id, CMD_QUERY_IS_LOSS_ACK)):
+                print("确定已经丢包")
+                # 清理掉其他的pk
+                pk_left = self.link.receive_packet(0)
+                while pk_left is not None:
+                    pk_left = self.link.receive_packet(0)
+                return True # 有丢失的返回True
+            else:   # 虽然不为空，但是不是我想要的，则重新收集
+                print("但是没有丢包")
+                answer = self.link.receive_packet(2)
+        return False
+            
+        
+    def upload_buffer_all(self, target_id, page, address, buff):
+        count = 0
+        pk = CRTPPacket()
+        pk.set_header(0xFF, 0xFF)
+        pk.data = struct.pack('=BBHH', target_id, 0x14, page, address)
+
+        for i in range(0, len(buff)):
+            pk.data.append(buff[i])
+
+            count += 1
+
+            if count > 24:
+                self.link.send_packet(pk)
+                count = 0
+                pk = CRTPPacket()
+                pk.set_header(0xFF, 0xFF)
+                pk.data = struct.pack('=BBHH', target_id, 0x14, page,
+                                      i + address + 1)
+
+        self.link.send_packet(pk)
+        
 
     def read_flash(self, addr=0xFF, page=0x00):
         print("Cloader: read_flash")
@@ -490,14 +557,16 @@ class Cloader:
         while pk is not None:
             pk = self.link.receive_packet(0)
 
+        CMD_WRITE_FLASH=0x18
+        CMD_WRITE_FLASH_ACK = 0x28
         retry_counter = 5
         # print "Flasing to 0x{:X}".format(addr)
         while ((not pk or pk.header != 0xFF or len(pk.data) < 2 or
-                struct.unpack('<BB', pk.data[0:2]) != (addr, 0x18)) and
+                struct.unpack('<BB', pk.data[0:2]) != (addr, CMD_WRITE_FLASH_ACK)) and
                retry_counter >= 0):
             pk = CRTPPacket()
             pk.set_header(0xFF, 0xFF)
-            pk.data = struct.pack('<BBHHH', addr, 0x18, page_buffer,
+            pk.data = struct.pack('<BBHHH', addr, CMD_WRITE_FLASH, page_buffer,
                                   target_page, page_count)
             self.link.send_packet(pk)
 

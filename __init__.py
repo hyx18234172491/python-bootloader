@@ -337,15 +337,16 @@ class Bootloader:
         # For each page
         ctr = 0  # Buffer counter
         for i in range(0, int((len(image) - 1) / t_data.page_size) + 1):
+            
             if self.terminate_flashing_cb and self.terminate_flashing_cb():
                 raise Exception('Flashing terminated')
 
             # Load the buffer
             if ((i + 1) * t_data.page_size) > len(image):
-                self._cload.upload_buffer(
+                self._cload.upload_buffer_alt(
                     t_data.addr, ctr, 0, image[i * t_data.page_size:])
             else:
-                self._cload.upload_buffer(
+                self._cload.upload_buffer_alt(
                     t_data.addr, ctr, 0,
                     image[i * t_data.page_size: (i + 1) * t_data.page_size])
 
@@ -375,6 +376,10 @@ class Bootloader:
                 else:
                     sys.stdout.write('%d' % ctr)
                     sys.stdout.flush()
+                
+                # 这里已经完成了一页的写，我需要在这里检查
+                
+
                 if not self._cload.write_flash(t_data.addr, 0,
                                                start_page + i - (ctr - 1),
                                                ctr):
@@ -484,6 +489,8 @@ class Bootloader:
             else:
                 sys.stdout.write('.')
                 sys.stdout.flush()
+
+            self._cload.upload_buffer_process_loss(t_data.addr) # 这里来处理缺失的情况
 
             # Flash when the complete buffers are full
             if ctr >= t_data.buffer_pages:
