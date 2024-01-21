@@ -92,3 +92,9 @@ class Target:
         ret += '%d KBytes of flash available for firmware image.' % (
             (self.flash_pages - self.start_page) * self.page_size / 1024)
         return ret
+
+class FlashProgress():
+    def __init__(self,cpuid) -> None:
+        self.cpuid = cpuid
+        self.is_succ = True
+        pass

@@ -34,6 +34,7 @@ import time
 import cflib.crtp
 from .boottypes import Target
 from .boottypes import TargetTypes
+from .boottypes import FlashProgress
 from .boottypes import BootVersion
 from cflib.crtp.crtpstack import CRTPPacket
 
@@ -73,7 +74,7 @@ class Cloader:
         self.mapping = None
         self._available_boot_uri = ('radio://0/110/2M/E7E7E7E7E7', 'radio://0/0/2M/E7E7E7E7E7')
 
-        self.progress = {}
+        self.flash_progress = {}
 
     def close(self):
         print("Cloader: close")
@@ -280,29 +281,22 @@ class Cloader:
 
         flag = False # 表示第几次接收到数据包
         timeout_times = 0 # 超时次数
-        timeout_times_max = 3 # 超时次数最大值
+        timeout_times_max = 2 # 超时次数最大值
         each_wait_time = 2  # 每次等待时间
         timeout = 10  # seconds
         ts = time.time()
+        
         while time.time() - ts < timeout:
             # Wait for the answer
             answer = self.link.receive_packet(each_wait_time)
-            if answer is None:
-                timeout_times = timeout_times+1
-                if timeout_times < timeout_times_max:
-                    self.link.send_packet(pk)
-                else:
-                    if flag:
-                        return True
-                    else:
-                        return False
-            else:
+            while(answer):
                 if (answer.header == 0xFF and struct.unpack('<BB', answer.data[0:2]) ==
                         (target_id, CMD_GET_INFO_ACK)):
                     tab = struct.unpack('BBHHHH', answer.data[0:10])
                     cpuid = struct.unpack('H', answer.data[10:12])
-                    self.progress[cpuid]=0
-
+                    
+                    # self.flash_progress[cpuid].cpuid = cpuid
+                    self.flash_progress[cpuid] = FlashProgress(cpuid=cpuid)
                     if not flag:
                         flag = True
                         if target_id not in self.targets:
@@ -330,7 +324,21 @@ class Cloader:
                         self._update_mapping(target_id)
 
                     print("Cloader: _update_info true end")
+                    # return True
+                answer = self.link.receive_packet(each_wait_time)
+            # 到这里说明超时1次了
+            timeout_times = timeout_times+1
+            if timeout_times < timeout_times_max:
+                self.link.send_packet(pk)
+            else:
+                if flag:
+                    print(self.flash_progress)
                     return True
+                else:
+                    print(self.flash_progress)
+                    return False
+            
+
         print("Cloader: _update_info false end") 
         return False
     
