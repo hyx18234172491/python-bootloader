@@ -108,5 +108,8 @@ class FlashProgress():
     def setNotRecv(self):
         self.is_succ = 0 
     
+    def isFail(self):
+        return self.is_succ==-1
+
     def isSucc(self):
         return self.is_succ==1

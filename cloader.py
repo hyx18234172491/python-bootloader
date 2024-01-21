@@ -455,7 +455,16 @@ class Cloader:
 
         self.link.send_packet(pk)
     
+    def initFlashProgress(self):
+        '''
+        如果有未收到的,则返回false
+        '''
+        for progress in self.flash_progress.values():
+            if not progress.isFail():
+                progress.setNotRecv()
+    
     def upload_buffer_alt(self, target_id, page, address, buff):
+        self.initFlashProgress()
         self.upload_buffer(target_id, page, address, buff)
         # while(self.upload_buffer_query_loss(target_id)):    # 只要还有未接收到的则重新loaderbuffer
         #     print("retry loader buffer page-"+str(page))
@@ -495,28 +504,6 @@ class Cloader:
                 print("但是没有丢包")
                 answer = self.link.receive_packet(2)
         return False
-            
-        
-    def upload_buffer_all(self, target_id, page, address, buff):
-        count = 0
-        pk = CRTPPacket()
-        pk.set_header(0xFF, 0xFF)
-        pk.data = struct.pack('=BBHH', target_id, 0x14, page, address)
-
-        for i in range(0, len(buff)):
-            pk.data.append(buff[i])
-
-            count += 1
-
-            if count > 24:
-                self.link.send_packet(pk)
-                count = 0
-                pk = CRTPPacket()
-                pk.set_header(0xFF, 0xFF)
-                pk.data = struct.pack('=BBHH', target_id, 0x14, page,
-                                      i + address + 1)
-
-        self.link.send_packet(pk)
         
 
     def read_flash(self, addr=0xFF, page=0x00):
@@ -547,7 +534,7 @@ class Cloader:
         # For some reason we get one byte extra here...
         return buff[0:page_size]
     
-    def write_flash(self, addr, page_buffer, target_page, page_count):
+    def write_flash_alt(self, addr, page_buffer, target_page, page_count):
         print("Cloader: write_flash")
 
         """Initiate flashing of data in the buffer to flash."""
@@ -588,7 +575,7 @@ class Cloader:
 
         self.error_code = pk.data[3]
         return True
-        return pk.data[2] == 1
+        # return pk.data[2] == 1
 
     def checkFlashProgress(self):
         '''
@@ -601,7 +588,7 @@ class Cloader:
         return True
 
 
-    def write_flash_alt(self, addr, page_buffer, target_page, page_count):
+    def write_flash(self, addr, page_buffer, target_page, page_count):
         print("Cloader: write_flash")
 
         """Initiate flashing of data in the buffer to flash."""
