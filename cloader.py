@@ -281,7 +281,7 @@ class Cloader:
 
         flag = False # 表示第几次接收到数据包
         timeout_times = 0 # 超时次数
-        timeout_times_max = 2 # 超时次数最大值
+        timeout_times_max = 5 # 超时次数最大值
         each_wait_time = 2  # 每次等待时间
         timeout = 10  # seconds
         ts = time.time()
@@ -293,8 +293,8 @@ class Cloader:
                 if (answer.header == 0xFF and struct.unpack('<BB', answer.data[0:2]) ==
                         (target_id, CMD_GET_INFO_ACK)):
                     tab = struct.unpack('BBHHHH', answer.data[0:10])
-                    cpuid = struct.unpack('H', answer.data[10:12])
-                    
+                    cpuid = struct.unpack('H', answer.data[10:12])[0]
+                    print(cpuid)
                     # self.flash_progress[cpuid].cpuid = cpuid
                     self.flash_progress[cpuid] = FlashProgress(cpuid=cpuid)
                     if not flag:
@@ -311,20 +311,15 @@ class Cloader:
                         self.targets[target_id].buffer_pages = tab[3]
                         self.targets[target_id].flash_pages = tab[4]
                         self.targets[target_id].start_page = tab[5]
-                        self.targets[target_id].cpuid = '%02X' % cpuid[0]
+                        self.targets[target_id].cpuid = cpuid
                     else:
                         pass
-
-                    print("-- print cpu id start--")
-                    print('target id'+str(target_id))
-                    print(self.targets[target_id].cpuid)
-                    print("-- print cpu id end  --")
                     if (self.protocol_version == 0x10 and
                             target_id == TargetTypes.STM32):
                         self._update_mapping(target_id)
 
                     print("Cloader: _update_info true end")
-                    # return True
+                    return True
                 answer = self.link.receive_packet(each_wait_time)
             # 到这里说明超时1次了
             timeout_times = timeout_times+1
@@ -551,7 +546,7 @@ class Cloader:
 
         # For some reason we get one byte extra here...
         return buff[0:page_size]
-
+    
     def write_flash(self, addr, page_buffer, target_page, page_count):
         print("Cloader: write_flash")
 
@@ -572,6 +567,101 @@ class Cloader:
         while ((not pk or pk.header != 0xFF or len(pk.data) < 2 or
                 struct.unpack('<BB', pk.data[0:2]) != (addr, CMD_WRITE_FLASH_ACK)) and
                retry_counter >= 0):
+            pk = CRTPPacket()
+            pk.set_header(0xFF, 0xFF)
+            pk.data = struct.pack('<BBHHH', addr, CMD_WRITE_FLASH, page_buffer,
+                                  target_page, page_count)
+            self.link.send_packet(pk)
+
+            # Timeout for writing to flash is raised from 1s (used elsewhere
+            # in this module) to 2.5s because it may take more than a second
+            # to erase a page on the STM32F405.
+            #
+            # See https://github.com/bitcraze/crazyflie-lib-python/issues/98
+            # for more details.
+            pk = self.link.receive_packet(2.5)
+            retry_counter -= 1
+
+        if retry_counter < 0:
+            self.error_code = -1
+            return False
+
+        self.error_code = pk.data[3]
+        return True
+        return pk.data[2] == 1
+
+    def checkFlashProgress(self):
+        '''
+        如果有未收到的,则返回false
+        '''
+        for progress in self.flash_progress.values():
+            if progress.isNotRecv():
+                print("还未收到cpuid:"+str(progress.getCpuId())+'的write flash ack')
+                return False
+        return True
+
+
+    def write_flash_alt(self, addr, page_buffer, target_page, page_count):
+        print("Cloader: write_flash")
+
+        """Initiate flashing of data in the buffer to flash."""
+        # print "Write page", flashPage
+        # print "Writing page [%d] and [%d] forward" % (flashPage, nPage)
+        pk = None
+
+        # Flushing downlink ...
+        pk = self.link.receive_packet(0)
+        while pk is not None:
+            pk = self.link.receive_packet(0)
+
+        CMD_WRITE_FLASH=0x18
+        CMD_WRITE_FLASH_ACK = 0x28
+
+        # 发送write_flash命令
+        # 只要存在没有接收的,则执行，count如果大于3认为它已经失联了
+        count = 0
+        while(self.checkFlashProgress()==False and count < 3):
+            count+=1
+            pk = CRTPPacket()
+            pk.set_header(0xFF, 0xFF)
+            pk.data = struct.pack('<BBHHH', addr, CMD_WRITE_FLASH, page_buffer,
+                                    target_page, page_count)
+            self.link.send_packet(pk)
+            # 接收数据包
+            pk = self.link.receive_packet(2.5)
+            pk_list =[]
+            while(pk):
+                pk_list.append(pk)
+                pk = self.link.receive_packet(1)
+            print('开始解析write_falsh_ack数据包')
+            # 需要解析所有的数据包
+            for pk in pk_list:
+                print(len(pk.data))
+                if (pk.header == 0xFF and len(pk.data) >= 6 and
+                    struct.unpack('<BB', pk.data[0:2]) == (addr, CMD_WRITE_FLASH_ACK)):
+                    pass
+                    # 更新cpuid对应的已经写成功
+                    print('解析成功')
+                    cpuid = struct.unpack('H', pk.data[4:6])[0]
+                    print("cpuid:")
+                    print(cpuid)
+                    if(pk.data[2] == 1):
+                        if(self.flash_progress[cpuid].is_succ!=-1): # -1代表已经失败了，现在成功也没用
+                            self.flash_progress[cpuid].is_succ = 1
+                    else:
+                        self.flash_progress[cpuid].is_succ = -1 # 说明写失败了
+        return True
+
+
+
+
+        retry_counter = 5
+        # print "Flasing to 0x{:X}".format(addr)
+        while ((not pk or pk.header != 0xFF or len(pk.data) < 2 or
+                struct.unpack('<BB', pk.data[0:2]) != (addr, CMD_WRITE_FLASH_ACK)) and
+               retry_counter >= 0):
+
+
             pk = CRTPPacket()
             pk.set_header(0xFF, 0xFF)
             pk.data = struct.pack('<BBHHH', addr, CMD_WRITE_FLASH, page_buffer,

@@ -96,5 +96,17 @@ class Target:
 class FlashProgress():
     def __init__(self,cpuid) -> None:
         self.cpuid = cpuid
-        self.is_succ = True
+        self.is_succ = 0    # 1代表成功，0代表还未赋值，-1代表失败
         pass
+    
+    def getCpuId(self):
+        return self.cpuid
+
+    def isNotRecv(self):
+        return self.is_succ==0
+    
+    def setNotRecv(self):
+        self.is_succ = 0 
+    
+    def isSucc(self):
+        return self.is_succ==1
